@@ -12,12 +12,7 @@ typedef struct _encdata {
 	int pin_button;
 	int pin_left;
 	int pin_right;
-	void *cb_button;
-	void *cb_rotate;
 } encdata;
-
-#define BUTTON_LEFT	0
-#define BUTTON_RIGHT	1
 
 // lcd_<[registerselect|enable|data0-3]>_pin
 #define LCD_RS_PIN	1
@@ -40,54 +35,62 @@ int enc_val = 0;
 int btn_val = 0;
 int shutdown = 0;
 
-pthread_t t_encoder;
-mutex_t m_lcd, m_enc, m_btn;
-
-void lcdup() {
-	pthread_mutex_lock(&m_lcd);
-	stdoutup();
-	lcdClear(lcd);
-	delay(2);
-	lcdPrintf(lcd, "v: %i, b: %i", enc_val, btn_val);
-	delay(2);
-	pthread_mutex_unlock(&m_lcd);
-}
+pthread_t t_encoders[2];
+pthread_mutex_t m_lcd, m_enc, m_btn;
 
 void stdoutup() {
 	printf("\033[2K\r\tvalue: %i\tbutton: %i", enc_val, btn_val);
 }
 
-void cb_button(int btn, int state) {
-	pthread_mutex_lock(&m_btn);
-	if (state) btn_val |= 1 << btn; else btn_val &= ~(1 << btn);
-	pthread_mutex_unlock(&m_btn);
+void lcdup() {
+	pthread_mutex_lock(&m_lcd);
+	stdoutup();
+	lcdClear(lcd);
+	delay(4);
+	lcdPrintf(lcd, "v: %i, b: %i", enc_val, btn_val);
+	delay(4);
+	pthread_mutex_unlock(&m_lcd);
+}
+
+void cb_button(encdata *enc, int state) {
+	btn_val = state;
 	lcdup();
 }
 
-void cb_encoder(int enc, int direction) {
-	pthread_mutex_lock(&m_enc);
-	
-	pthread_mutex_unlock(&m_enc);
+void cb_rotate(encdata *enc, int direction) {
+	enc_val = enc_val + direction;
+	lcdup();
 }
 
 void t_encoder_func(void *args) {
-	int roen[3] = { 12, 13, 14 };
-	int roev[3] = { 0, 0, 0 }, u;
+	int val_pin_button = 0,
+	    val_pin_left = 0,
+	    val_pin_right = 0;
 	int l, e, s, b = 0;
 
-	for (u = 0; u < 3; ++u) { pinMode(roen[u], INPUT); pullUpDnControl(roen[u], PUD_UP); }
+	encdata *enc = (encdata*)args;
 
-	lcdup();
+	pinMode(enc->pin_button, INPUT); pullUpDnControl(enc->pin_button, PUD_UP);
+	pinMode(enc->pin_left  , INPUT); pullUpDnControl(enc->pin_left  , PUD_UP);
+	pinMode(enc->pin_right , INPUT); pullUpDnControl(enc->pin_right , PUD_UP);
+
 	while (1) {
-		for (u = 0; u < 3; ++u) roev[u] = digitalRead(roen[u]);
-		e = (roev[0] << 1) | roev[1];
+		val_pin_button = digitalRead(enc->pin_button);
+		val_pin_left = digitalRead(enc->pin_left);
+		val_pin_right = digitalRead(enc->pin_right);
+
+		e = (val_pin_left << 1) | val_pin_right;
 		s = (l << 2) | e;
-		if (roev[2] != b) {
-			b = roev[2];
-			if (b == 0) btn_down(); else btn_up();
-		} else {
-			if (s == 1) enc_left(); // || s == 14
-			if (s == 2) enc_right(); // || s == 13
+		if (val_pin_button != b) {
+			b = val_pin_button;
+			pthread_mutex_lock(&m_btn);
+			cb_button(enc, val_pin_button);
+			pthread_mutex_unlock(&m_btn);
+		}
+		if (s == 1 || s == 2) {
+			pthread_mutex_lock(&m_enc);
+			cb_rotate(enc, --s ? s : --s);
+			pthread_mutex_unlock(&m_enc);
 		}
 		delay(2);
 		l = e;
@@ -107,8 +110,15 @@ void sighandler(int signum) {
 		}
 		printf("exiting...\n");
 		shutdown = 1;
-		exit(signum);
+		//exit(signum);
 	}
+}
+
+encdata* mkencdata(encdata *enc, int button, int left, int right) {
+	enc->pin_button = button;
+	enc->pin_left = left;
+	enc->pin_right = right;
+	return enc;
 }
 
 int main(int argc, char* argv[]) {
@@ -130,8 +140,13 @@ int main(int argc, char* argv[]) {
 		exit(2);
 	}
 
-	pthread_create(&t_encoder, NULL, (void *)t_encoder_func, NULL);
-	pthread_join(t_encoder, NULL);
+	encdata enc_left, enc_right;
+
+	pthread_create(&t_encoders[0], NULL, (void *)t_encoder_func, (void*)mkencdata(&enc_left, 3, 0, 2));
+	pthread_create(&t_encoders[1], NULL, (void *)t_encoder_func, (void*)mkencdata(&enc_right, 14, 12, 13));
+	pthread_join(t_encoders[0], NULL);
+	pthread_join(t_encoders[1], NULL);
+//	for (size_t i = 0; i < sizeof(t_encoders) * sizeof(encdata); ++i) pthread_join(t_encoders[i], NULL);
 
 	return 0;
 }
