@@ -45,10 +45,10 @@ void stdoutup() {
 void lcdup() {
 	pthread_mutex_lock(&m_lcd);
 	stdoutup();
+	delay(2);
 	lcdClear(lcd);
 	delay(4);
 	lcdPrintf(lcd, "v: %i, b: %i", enc_val, btn_val);
-	delay(4);
 	pthread_mutex_unlock(&m_lcd);
 }
 
@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
 
 	// rows, cols, bits, rs, en, d0-d7
 	lcd = lcdInit(2, 16, 4, LCD_RS_PIN, LCD_EN_PIN, LCD_D0_PIN, LCD_D1_PIN, LCD_D2_PIN, LCD_D3_PIN, 0, 0, 0, 0);
-	delay(5);
+//	delay(5);
 	if (lcd == -1) {
 		printf("lcdinit failed!\nexiting.\n");
 		exit(2);
